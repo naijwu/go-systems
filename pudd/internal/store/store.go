@@ -10,8 +10,56 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+type DiscoveredRow struct {
+	DeviceID string
+	SrcPath string
+	StagedPath string
+	Size int64
+	State model.FileState
+}
+
 func Open(path string) (*sql.DB, error) {
 	return sql.Open("sqlite", path)
+}
+
+func InsertDiscovered(db *sql.DB, r DiscoveredRow) error {
+	_, err := db.Exec(`
+INSERT OR IGNORE INTO files (device_id, src_path, staged_path, size, state)
+VALUES (?, ?, ?, ?, ?)
+`, r.DeviceID, r.SrcPath, r.StagedPath, r.Size, string(r.State))
+	return err
+}
+
+func FetchRunnable(db *sql.DB, limit int) ([]model.FileRow, error) {
+	rows, err := db.Query(`
+SELECT id, device_id, src_path, staged_path, size, sha256, crc32c, state, attempts, last_error
+FROM files
+WHERE (next_run_at IS NULL OR next_run_at <= CURRENT_TIMESTAMP) AND state IN ('DISCOVERED','QUEUED','VERIFIED')
+ORDER BY id
+LIMIT ?
+`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []model.FileRow
+	for rows.Next() {
+		var f model.FileRow
+		var stateStr string
+		var crc32c int64
+		if err := rows.Scan(
+			&f.ID, &f.DeviceID, &f.SrcPath, &f.StagedPath,
+			&f.Size, &f.SHA256, &crc32c,
+			&stateStr, &f.Attempts, &f.LastError,
+		); err != nil {
+			return nil, err
+		}
+		f.CRC32C = uint32(crc32c)
+		f.State = model.FileState(stateStr)
+		out = append(out, f)
+	}
+	return out, rows.Err()
 }
 
 func FetchRunnableQueued(db *sql.DB, limit int) ([]model.FileRow, error) {
@@ -59,6 +107,51 @@ WHERE id = ? AND (state = ? OR (state = ? AND (claim_until IS NULL OR claim_unti
 	n, _ := res.RowsAffected()
 	return n == 1, nil
 }
+
+func ClaimDiscovered(db *sql.DB, fileID int64, workerID string, lease time.Duration) (bool, error) {
+	res, err := db.Exec(`
+UPDATE files
+SET state='COPYING',
+    claimed_by=?,
+    claim_until=datetime('now', ?),
+    updated_at=CURRENT_TIMESTAMP
+WHERE id=?
+  AND (
+    state='DISCOVERED'
+    OR (state='COPYING' AND (claim_until IS NULL OR claim_until < CURRENT_TIMESTAMP))
+  )
+`, workerID, sqliteDuration(lease), fileID)
+	if err != nil { return false, err }
+	n, _ := res.RowsAffected()
+	return n == 1, nil
+}
+
+func ClaimQueued(db *sql.DB, fileID int64, workerID string, lease time.Duration) (bool, error) {
+	res, err := db.Exec(`
+UPDATE files
+SET state='UPLOADING', claimed_by=?, claim_until=datetime('now', ?), updated_at=CURRENT_TIMESTAMP
+WHERE id=?
+  AND (
+    state='QUEUED'
+    OR (state='UPLOADING' AND (claim_until IS NULL OR claim_until < CURRENT_TIMESTAMP))
+  )
+`, workerID, sqliteDuration(lease), fileID)
+	if err != nil { return false, err }
+	n, _ := res.RowsAffected()
+	return n == 1, nil
+}
+
+func ClaimVerified(db *sql.DB, fileID int64, workerID string, lease time.Duration) (bool, error) {
+	res, err := db.Exec(`
+UPDATE files
+SET state='CLEANING', claimed_by=?, claim_until=datetime('now', ?), updated_at=CURRENT_TIMESTAMP
+WHERE id=? AND ( state='VERIFIED' OR (state='CLEANING' AND (claim_until IS NULL OR claim_until < CURRENT_TIMESTAMP)))
+`, workerID, sqliteDuration(lease), fileID)
+	if err != nil { return false, err }
+	n, _ := res.RowsAffected()
+	return n == 1, nil
+}
+
 
 // transition a file to a state
 func Transition(db *sql.DB, fileID int64, from, to model.FileState) error {

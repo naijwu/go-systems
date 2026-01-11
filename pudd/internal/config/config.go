@@ -15,6 +15,15 @@ type Config struct {
 	Bucket string
 	ObjectPrefix string
 	CredsJSON string
+
+	// Serial/device
+	MountRoot string
+	ProbeRoot string
+	StageRoot string
+
+	// File management behavior
+	DeleteCameraAfterCopy bool
+	DeleteLocalAfterVerify bool
 }
 
 func FromFlags() Config {
@@ -28,7 +37,13 @@ func FromFlags() Config {
 	flag.StringVar(&cfg.ObjectPrefix, "prefix", "pudd", "GCS object key prefix")
 	flag.StringVar(&cfg.CredsJSON, "creds", "", "path to service account JSON")
 
-	flag.Parse()
+	flag.StringVar(&cfg.MountRoot, "mount-root", "/mnt/dock", "mount root for cameras")
+	flag.StringVar(&cfg.ProbeRoot, "probe-root", "/mnt/dock/_probe", "temporary probe mounts")
+	flag.StringVar(&cfg.StageRoot, "stage-root", "/var/lib/pudd/staging", "staging root on SSD")
 
+	flag.BoolVar(&cfg.DeleteCameraAfterCopy, "delete-camera-after-copy", false, "DANGEROUS: delete camera file after successful copy (requires RW remount)")
+	flag.BoolVar(&cfg.DeleteLocalAfterVerify, "delete-local-after-verify", true, "delete staged file after GCS verify")
+
+	flag.Parse()
 	return cfg
 }
