@@ -16,7 +16,6 @@ import (
 	"pudd/internal/pipeline"
 	"pudd/internal/store"
 	"pudd/internal/udev"
-	"pudd/internal/worker"
 )
 
 func main() {
@@ -37,7 +36,7 @@ func main() {
 	defer cancel()
 
 	// Start pipeline
-	var uploader worker.Uploader
+	var uploader pipeline.Uploader
 	go pipeline.Run(ctx, logger, db, cfg, uploader)
 
 	// Map devnode -> mountpoint (so remove can unmount the right path)
