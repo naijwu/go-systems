@@ -16,4 +16,42 @@ go run ./cmd/pudd \
   -stage-root ./tmp/staging        # local staging area before upload
 ```
 
-If you need real device mounts/udev access, run the same command with `sudo`.
+For real device mounts/udev access, run with `sudo`.
+
+## Packages
+
+- `config`: parses CLI flags into runtime config values.
+- `model`: defines file rows and upload state-machine states.
+- `store`: owns SQLite schema, queries, claims, transitions, and retries.
+- `udev`: watches for USB block-device add/remove events.
+- `mount`: mounts and unmounts detected devices.
+- `deviceid`: derives a stable device ID from camera/media metadata.
+- `discover`: scans mounted media and inserts `DISCOVERED` files into SQLite.
+- `pipeline`: polls runnable files and advances them through copy, hash, upload, and cleanup.
+- `copyutil`: copies files into staging atomically.
+- `hash`: computes file size, SHA256, and CRC32C.
+- `gcs`: provides the cloud uploader and upload verification.
+- `camerautil`: optionally remounts RW to delete files from the camera after copy.
+
+## Runtime
+
+```text
+Camera via USB
+   |
+   v
+[udev] ---> [main] ---> [mount] ---> [deviceid] ---> [discover]
+                                |                      |
+                                |                      v
+                                |                 [store / sqlite]
+                                |                      |
+                                |                      v
+                                +--------------> [pipeline]
+                                                       |
+                                                       +--> [copyutil] --> staged file
+                                                       +--> [hash]
+                                                       +--> [gcs] (upload to cloud)
+                                                       +--> [camerautil] (delete on-camera)
+                                                       |
+                                                       v
+                                                  [store / sqlite]
+```
