@@ -21,22 +21,26 @@ import (
 
 func main() {
 	logger := log.New(os.Stdout, "", log.LstdFlags|log.Lmicroseconds)
+	logger.Println("[main.go] pudd starting...")
 	cfg := config.FromFlags()
+	logger.Println("[main.go] config loaded")
 
 	db, err := store.Open(cfg.DBPath)
 	if err != nil {
 		logger.Fatalf("open db: %v", err)
 	}
 	defer db.Close()
+	logger.Println("[main.go] sqlite database opened")
 
 	if err := store.Init(db); err != nil {
 		logger.Fatalf("init db: %v", err)
 	}
+	logger.Println("[main.go] sqlite database initialized")
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	// Start pipeline
+	// initialize GCS uploader
 	var uploader pipeline.Uploader
 	if cfg.Bucket != "" {
 		client, err := gcs.NewClient(ctx, cfg)
@@ -47,8 +51,11 @@ func main() {
 
 		uploader = gcs.NewUploader(client, cfg.Bucket, cfg.ObjectPrefix)
 	}
+	logger.Println("[main.go] GCS uploader initialized")
 
+	// Start pipeline
 	go pipeline.Run(ctx, logger, db, cfg, uploader)
+	logger.Println("[main.go] pipeline started")
 
 	// Map devnode -> mountpoint (so remove can unmount the right path)
 	var mu sync.Mutex
@@ -85,6 +92,8 @@ func handleAdd(
 	devToMount map[string]string,
 	ev udev.Event,
 ) {
+	logger.Println("[main.go->handleAdd] handling UDev addition")
+
 	if ev.DevName == "" {
 		return
 	}
@@ -134,6 +143,8 @@ func handleRemove(
 	devToMount map[string]string,
 	ev udev.Event,
 ) {
+	logger.Println("[main.go->handleRemove] handling UDev removal")
+
 	if ev.DevName == "" {
 		return
 	}
