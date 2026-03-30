@@ -15,6 +15,7 @@ import (
 	"pudd/internal/gcs"
 	"pudd/internal/mount"
 	"pudd/internal/pipeline"
+	"pudd/internal/progress"
 	"pudd/internal/store"
 	"pudd/internal/udev"
 )
@@ -54,7 +55,7 @@ func main() {
 		}
 		defer client.Close()
 
-		uploader = gcs.NewUploader(client, cfg.Bucket, cfg.ObjectPrefix)
+		uploader = gcs.NewUploader(client, cfg.Bucket, cfg.ObjectPrefix, progress.LoggerPublisher{Logger: logger})
 	}
 	logger.Println("[main.go] GCS uploader initialized")
 
