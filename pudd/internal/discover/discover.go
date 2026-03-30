@@ -14,12 +14,23 @@ import (
 
 // DiscoverAndInsert scans known media directories and inserts DISCOVERED rows
 func DiscoverAndInsert(ctx context.Context, db *sql.DB, deviceID, mountPoint, stageRoot string) error {
-	roots := []string{
-		filepath.Join(mountPoint, "Movies"),
+	entries, err := os.ReadDir(mountPoint)
+	if err != nil {
+		return err
+	}
+
+	var roots []string
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if strings.EqualFold(name, "Movies") || strings.EqualFold(name, "DCIM") {
+			roots = append(roots, filepath.Join(mountPoint, name))
+		}
 	}
 
 	for _, root := range roots {
-		// skip if movies/ doesn't exist
 		if _, err := os.Stat(root); err != nil {
 			continue
 		}
