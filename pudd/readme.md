@@ -1,5 +1,11 @@
 # `pudd`
 
+## About
+
+`pudd` is a device-side ingestion daemon for the dock. It runs on the dock hardware, detects attached cameras over USB, copies video files to local staging, uploads them to Google Cloud Storage, and exposes local status for an on-device UI.
+
+## Run
+
 From `pudd/`:
 
 ```sh
