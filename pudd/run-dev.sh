@@ -6,7 +6,7 @@ cd "$SCRIPT_DIR"
 
 mkdir -p ./etc ./tmp/mnt/_probe ./tmp/staging
 
-go run ./cmd/pudd \
+/usr/local/go/bin/go run ./cmd/pudd \
   -bucket pudd \
   -prefix devices/dev-test-001 \
   -creds ./etc/pudd-dev-sa.json \
