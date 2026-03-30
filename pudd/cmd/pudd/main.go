@@ -61,23 +61,34 @@ func main() {
 	var mu sync.Mutex
 	devToMount := map[string]string{}
 
+	dispatchEvent := func(ev udev.Event) {
+		switch ev.Action {
+		case "add":
+			handleAdd(ctx, logger, db, cfg, &mu, devToMount, ev)
+		case "remove":
+			handleRemove(logger, &mu, devToMount, ev)
+		}
+	}
+
 	_ = os.MkdirAll(cfg.ProbeRoot, 0o755)
 	_ = os.MkdirAll(cfg.MountRoot, 0o755)
 
 	go func() {
-		err := udev.Run(ctx, func(ev udev.Event) {
-			switch ev.Action {
-			case "add":
-				handleAdd(ctx, logger, db, cfg, &mu, devToMount, ev)
-			case "remove":
-				handleRemove(logger, &mu, devToMount, ev)
-			}
-		})
+		err := udev.Run(ctx, dispatchEvent)
 		if err != nil && err != context.Canceled {
 			logger.Printf("udev monitor error: %v", err)
 			cancel()
 		}
 	}()
+
+	current, err := udev.EnumerateCurrent(ctx)
+	if err != nil {
+		logger.Printf("startup reconcile failed: %v", err)
+	} else {
+		for _, ev := range current {
+			dispatchEvent(ev)
+		}
+	}
 
 	<-ctx.Done()
 	logger.Println("pudd exiting")

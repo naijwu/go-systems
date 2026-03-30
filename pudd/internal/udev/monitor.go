@@ -8,10 +8,10 @@ import (
 )
 
 type Event struct {
-	Action string // add/remove
-	DevName string // /dev/sda1
-	DevPath string // DEVPATH=...
-	Props map[string]string // key=value from udev
+	Action  string            // add/remove
+	DevName string            // /dev/sda1
+	DevPath string            // DEVPATH=...
+	Props   map[string]string // key=value from udev
 }
 
 // Run listens to udev block events and calls onEvent for USB partitions only.
@@ -42,30 +42,9 @@ func Run(ctx context.Context, onEvent func(Event)) error {
 	props := map[string]string{}
 
 	flush := func() {
-		if len(props) == 0 {
-			return
+		if ev, ok := eventFromMonitorProps(props); ok {
+			onEvent(ev)
 		}
-		// Filter: USB partition add/remove only.
-		if props["ID_BUS"] != "usb" {
-			props = map[string]string{}
-			return
-		}
-		if props["DEVTYPE"] != "partition" {
-			props = map[string]string{}
-			return
-		}
-		action := props["ACTION"]
-		if action != "add" && action != "remove" {
-			props = map[string]string{}
-			return
-		}
-
-		onEvent(Event{
-			Action:  action,
-			DevName: props["DEVNAME"],
-			DevPath: props["DEVPATH"],
-			Props:   props,
-		})
 		props = map[string]string{}
 	}
 
