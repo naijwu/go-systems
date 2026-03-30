@@ -12,6 +12,7 @@ import (
 	"pudd/internal/config"
 	"pudd/internal/deviceid"
 	"pudd/internal/discover"
+	"pudd/internal/gcs"
 	"pudd/internal/mount"
 	"pudd/internal/pipeline"
 	"pudd/internal/store"
@@ -37,6 +38,16 @@ func main() {
 
 	// Start pipeline
 	var uploader pipeline.Uploader
+	if cfg.Bucket != "" {
+		client, err := gcs.NewClient(ctx, cfg)
+		if err != nil {
+			logger.Fatalf("create gcs client: %v", err)
+		}
+		defer client.Close()
+
+		uploader = gcs.NewUploader(client, cfg.Bucket, cfg.ObjectPrefix)
+	}
+
 	go pipeline.Run(ctx, logger, db, cfg, uploader)
 
 	// Map devnode -> mountpoint (so remove can unmount the right path)

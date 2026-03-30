@@ -6,10 +6,13 @@ From `pudd/`:
 go run ./cmd/pudd
 ```
 
-Example with local writable paths:
+Example with local writable paths (from `run-dev.sh`):
 
 ```sh
 go run ./cmd/pudd \
+  -bucket pudd \                   # Google cloud storagte
+  -prefix devices/dev-test-001 \   # GCS bucket prefix
+  -creds ./etc/pudd-dev-sa.json \  # GCS credentials
   -db ./pudd.db \                  # sqlite database file
   -mount-root ./tmp/mnt \          # final mount directory for devices
   -probe-root ./tmp/mnt/_probe \   # temporary mount used to inspect devices
@@ -55,3 +58,4 @@ Camera via USB
                                                        v
                                                   [store / sqlite]
 ```
+
