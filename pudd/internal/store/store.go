@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"time"
 
 	"pudd/internal/model"
@@ -11,11 +12,11 @@ import (
 )
 
 type DiscoveredRow struct {
-	DeviceID string
-	SrcPath string
+	DeviceID   string
+	SrcPath    string
 	StagedPath string
-	Size int64
-	State model.FileState
+	Size       int64
+	State      model.FileState
 }
 
 func Open(path string) (*sql.DB, error) {
@@ -23,14 +24,22 @@ func Open(path string) (*sql.DB, error) {
 }
 
 func InsertDiscovered(db *sql.DB, r DiscoveredRow) error {
-	_, err := db.Exec(`
+	res, err := db.Exec(`
 INSERT OR IGNORE INTO files (device_id, src_path, staged_path, size, state)
 VALUES (?, ?, ?, ?, ?)
 `, r.DeviceID, r.SrcPath, r.StagedPath, r.Size, string(r.State))
-	return err
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 1 {
+		log.Printf("[discover] found file device=%s src=%s size=%d", r.DeviceID, r.SrcPath, r.Size)
+	}
+	return nil
 }
 
 func FetchRunnable(db *sql.DB, limit int) ([]model.FileRow, error) {
+	log.Printf("[state] fetching runnable")
+	
 	rows, err := db.Query(`
 SELECT id, device_id, src_path, staged_path, size, sha256, crc32c, state, attempts, last_error
 FROM files
@@ -89,7 +98,7 @@ LIMIT ?
 		f.State = model.FileState(stateStr)
 		out = append(out, f)
 	}
-	
+
 	return out, rows.Err()
 }
 
@@ -105,6 +114,9 @@ WHERE id = ? AND (state = ? OR (state = ? AND (claim_until IS NULL OR claim_unti
 		return false, err
 	}
 	n, _ := res.RowsAffected()
+	if n == 1 {
+		log.Printf("[state] file=%d -> %s", fileID, model.StateUploading)
+	}
 	return n == 1, nil
 }
 
@@ -121,8 +133,13 @@ WHERE id=?
     OR (state='COPYING' AND (claim_until IS NULL OR claim_until < CURRENT_TIMESTAMP))
   )
 `, workerID, sqliteDuration(lease), fileID)
-	if err != nil { return false, err }
+	if err != nil {
+		return false, err
+	}
 	n, _ := res.RowsAffected()
+	if n == 1 {
+		log.Printf("[state] file=%d -> %s", fileID, model.StateCopying)
+	}
 	return n == 1, nil
 }
 
@@ -136,8 +153,13 @@ WHERE id=?
     OR (state='UPLOADING' AND (claim_until IS NULL OR claim_until < CURRENT_TIMESTAMP))
   )
 `, workerID, sqliteDuration(lease), fileID)
-	if err != nil { return false, err }
+	if err != nil {
+		return false, err
+	}
 	n, _ := res.RowsAffected()
+	if n == 1 {
+		log.Printf("[state] file=%d -> %s", fileID, model.StateUploading)
+	}
 	return n == 1, nil
 }
 
@@ -147,11 +169,15 @@ UPDATE files
 SET state='CLEANING', claimed_by=?, claim_until=datetime('now', ?), updated_at=CURRENT_TIMESTAMP
 WHERE id=? AND ( state='VERIFIED' OR (state='CLEANING' AND (claim_until IS NULL OR claim_until < CURRENT_TIMESTAMP)))
 `, workerID, sqliteDuration(lease), fileID)
-	if err != nil { return false, err }
+	if err != nil {
+		return false, err
+	}
 	n, _ := res.RowsAffected()
+	if n == 1 {
+		log.Printf("[state] file=%d -> %s", fileID, model.StateCleaning)
+	}
 	return n == 1, nil
 }
-
 
 // transition a file to a state
 func Transition(db *sql.DB, fileID int64, from, to model.FileState) error {
@@ -159,7 +185,7 @@ func Transition(db *sql.DB, fileID int64, from, to model.FileState) error {
 UPDATE files
 SET state = ?, updated_at = CURRENT_TIMESTAMP
 WHERE id = ? AND state = ?
-`, string (to), fileID, string(from))
+`, string(to), fileID, string(from))
 	if err != nil {
 		return err
 	}
@@ -167,7 +193,8 @@ WHERE id = ? AND state = ?
 	if n != 1 {
 		return fmt.Errorf("Transition %s -> %s failed for file=%d", from, to, fileID)
 	}
-	return nil;
+	log.Printf("[state] file=%d %s -> %s", fileID, from, to)
+	return nil
 }
 
 // for updating hashes post network action
@@ -187,7 +214,7 @@ func MarkErrorWithBackoff(db *sql.DB, fileID int64, cause error) {
 	attempts++
 
 	// exponential backoff
-	delay := time.Second * time.Duration(1 << min64(attempts, 10))
+	delay := time.Second * time.Duration(1<<min64(attempts, 10))
 	nextRun := time.Now().Add(delay).UTC().Format("2006-01-02 16:01:02")
 
 	msg := cause.Error()
@@ -198,7 +225,7 @@ func MarkErrorWithBackoff(db *sql.DB, fileID int64, cause error) {
 	_, _ = db.Exec(`
 UPDATE files
 SET state = ?, attempts = ?, last_error = ?, next_run_at = ?, updated_at = CURRENT_TIMESTAMP
-WHERE id=?`, 
+WHERE id=?`,
 		string(model.StateError), attempts, msg, nextRun, fileID,
 	)
 
