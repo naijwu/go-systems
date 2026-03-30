@@ -24,6 +24,9 @@ func DeleteFromCamera(mountPoint string, absPath string) error {
 	defer func() { _ = RemountRO(mountPoint) }()
 
 	if err := os.Remove(absPath); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
 		return fmt.Errorf("remove: %w", err)
 	}
 	// Best-effort sync

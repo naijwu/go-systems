@@ -241,7 +241,7 @@ WHERE id=?`,
 	return err
 }
 
-func MarkErrorWithBackoff(db *sql.DB, fileID int64, cause error) {
+func MarkRetriable(db *sql.DB, fileID int64, resumeState model.FileState, cause error) {
 	var attempts int64
 	_ = db.QueryRow(`SELECT attempts FROM files WHERE id=?`, fileID).Scan(&attempts)
 	attempts++
@@ -257,16 +257,9 @@ func MarkErrorWithBackoff(db *sql.DB, fileID int64, cause error) {
 
 	_, _ = db.Exec(`
 UPDATE files
-SET state = ?, attempts = ?, last_error = ?, next_run_at = ?, updated_at = CURRENT_TIMESTAMP
+SET state=?, attempts=?, last_error=?, next_run_at=?, claimed_by='', claim_until=NULL, updated_at=CURRENT_TIMESTAMP
 WHERE id=?`,
-		string(model.StateError), attempts, msg, nextRun, fileID,
-	)
-
-	_, _ = db.Exec(`
-UPDATE files
-SET state=?, updated_at=CURRENT_TIMESTAMP
-WHERE id=? AND state=?`,
-		string(model.StateQueued), fileID, string(model.StateError),
+		string(resumeState), attempts, msg, nextRun, fileID,
 	)
 }
 

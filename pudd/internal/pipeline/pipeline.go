@@ -97,7 +97,7 @@ func handleDiscovered(ctx context.Context, logger *log.Logger, db *sql.DB, cfg c
 
 	// Copy with atomic tmp + fsync + rename
 	if err := copyutil.CopyAtomic(srcAbs, f.StagedPath); err != nil {
-		store.MarkErrorWithBackoff(db, f.ID, err)
+		store.MarkRetriable(db, f.ID, model.StateDiscovered, err)
 		return
 	}
 
@@ -117,11 +117,11 @@ func handleDiscovered(ctx context.Context, logger *log.Logger, db *sql.DB, cfg c
 	// Hash the staged file once
 	h, err := hash.Compute(f.StagedPath)
 	if err != nil {
-		store.MarkErrorWithBackoff(db, f.ID, err)
+		store.MarkRetriable(db, f.ID, model.StateDiscovered, err)
 		return
 	}
 	if err := store.UpdateHashes(db, f.ID, h.Size, h.SHA256, h.CRC32C); err != nil {
-		store.MarkErrorWithBackoff(db, f.ID, err)
+		store.MarkRetriable(db, f.ID, model.StateDiscovered, err)
 		return
 	}
 
@@ -139,18 +139,18 @@ func handleQueued(ctx context.Context, logger *log.Logger, db *sql.DB, cfg confi
 	if f.Size == 0 || f.SHA256 == "" || f.CRC32C == 0 {
 		h, err := hash.Compute(f.StagedPath)
 		if err != nil {
-			store.MarkErrorWithBackoff(db, f.ID, err)
+			store.MarkRetriable(db, f.ID, model.StateQueued, err)
 			return
 		}
 		if err := store.UpdateHashes(db, f.ID, h.Size, h.SHA256, h.CRC32C); err != nil {
-			store.MarkErrorWithBackoff(db, f.ID, err)
+			store.MarkRetriable(db, f.ID, model.StateQueued, err)
 			return
 		}
 		f.Size, f.SHA256, f.CRC32C = h.Size, h.SHA256, h.CRC32C
 	}
 
 	if err := uploader.UploadAndVerify(ctx, f); err != nil {
-		store.MarkErrorWithBackoff(db, f.ID, err)
+		store.MarkRetriable(db, f.ID, model.StateQueued, err)
 		return
 	}
 
@@ -164,11 +164,18 @@ func handleVerified(ctx context.Context, logger *log.Logger, db *sql.DB, cfg con
 		return
 	}
 
+	if cfg.DeleteCameraAfterVerify {
+		mountPoint := filepath.Join(cfg.MountRoot, f.DeviceID)
+		srcAbs := filepath.Join(cfg.MountRoot, f.DeviceID, strings.TrimPrefix(f.SrcPath, "/"))
+		if err := camerautil.DeleteFromCamera(mountPoint, srcAbs); err != nil {
+			store.MarkRetriable(db, f.ID, model.StateVerified, err)
+			return
+		}
+	}
+
 	if cfg.DeleteLocalAfterVerify {
 		if err := os.Remove(f.StagedPath); err != nil {
-			// keep it retriable
-			store.MarkErrorWithBackoff(db, f.ID, err)
-			_ = store.Transition(db, f.ID, model.StateCleaning, model.StateVerified)
+			store.MarkRetriable(db, f.ID, model.StateVerified, err)
 			return
 		}
 	}

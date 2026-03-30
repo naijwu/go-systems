@@ -6,15 +6,15 @@ import (
 )
 
 type Config struct {
-	DBPath string
-	Workers int
+	DBPath       string
+	Workers      int
 	PollInterval time.Duration
-	Lease time.Duration
+	Lease        time.Duration
 
 	// GCS
-	Bucket string
+	Bucket       string
 	ObjectPrefix string
-	CredsJSON string
+	CredsJSON    string
 
 	// Serial/device
 	MountRoot string
@@ -22,16 +22,17 @@ type Config struct {
 	StageRoot string
 
 	// File management behavior
-	DeleteCameraAfterCopy bool
-	DeleteLocalAfterVerify bool
+	DeleteCameraAfterCopy   bool
+	DeleteCameraAfterVerify bool
+	DeleteLocalAfterVerify  bool
 }
 
 func FromFlags() Config {
 	var cfg Config
 	flag.StringVar(&cfg.DBPath, "db", "./pudd.db", "path to sqlite DB")
 	flag.IntVar(&cfg.Workers, "workers", 2, "number of upload workers")
-	flag.DurationVar(&cfg.PollInterval, "poll", 750 * time.Millisecond, "scheduler poll interval")
-	flag.DurationVar(&cfg.Lease, "lease", 2 * time.Minute, "upload lease duration")
+	flag.DurationVar(&cfg.PollInterval, "poll", 750*time.Millisecond, "scheduler poll interval")
+	flag.DurationVar(&cfg.Lease, "lease", 2*time.Minute, "upload lease duration")
 
 	flag.StringVar(&cfg.Bucket, "bucket", "", "GCS bucket name")
 	flag.StringVar(&cfg.ObjectPrefix, "prefix", "pudd", "GCS object key prefix")
@@ -42,6 +43,7 @@ func FromFlags() Config {
 	flag.StringVar(&cfg.StageRoot, "stage-root", "/var/lib/pudd/staging", "staging root on SSD")
 
 	flag.BoolVar(&cfg.DeleteCameraAfterCopy, "delete-camera-after-copy", false, "DANGEROUS: delete camera file after successful copy (requires RW remount)")
+	flag.BoolVar(&cfg.DeleteCameraAfterVerify, "delete-camera-after-verify", false, "DANGEROUS: delete camera file after upload verify and before local cleanup (requires RW remount)")
 	flag.BoolVar(&cfg.DeleteLocalAfterVerify, "delete-local-after-verify", true, "delete staged file after GCS verify")
 
 	flag.Parse()
