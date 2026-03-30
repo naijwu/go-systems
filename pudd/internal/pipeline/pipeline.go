@@ -44,11 +44,12 @@ func Run(ctx context.Context, logger *log.Logger, db *sql.DB, cfg config.Config,
 				logger.Printf("pipeline fetch error: %v", err)
 				continue
 			}
+		enqueue:
 			for _, f := range rows {
 				select {
 				case jobs <- f:
 				default:
-					break
+					break enqueue
 				}
 			}
 		}
@@ -68,15 +69,15 @@ func workerLoop(ctx context.Context, logger *log.Logger, db *sql.DB, cfg config.
 			}
 
 			switch f.State {
-			case model.StateDiscovered:
+			case model.StateDiscovered, model.StateCopying:
 				handleDiscovered(ctx, logger, db, cfg, workerID, f)
-			case model.StateQueued:
+			case model.StateQueued, model.StateUploading:
 				if uploader == nil {
 					// Upload not configured
 					continue
 				}
 				handleQueued(ctx, logger, db, cfg, workerID, f, uploader)
-			case model.StateVerified:
+			case model.StateVerified, model.StateCleaning:
 				handleVerified(ctx, logger, db, cfg, workerID, f)
 			default:
 				// ignore

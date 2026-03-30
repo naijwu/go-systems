@@ -37,13 +37,46 @@ VALUES (?, ?, ?, ?, ?)
 	return nil
 }
 
+// RecoverInterruptedWork resets in-flight states to their last durable runnable state.
+// This lets a fresh daemon process resume work immediately after an unclean shutdown.
+func RecoverInterruptedWork(db *sql.DB) error {
+	recoveries := []struct {
+		from model.FileState
+		to   model.FileState
+	}{
+		{from: model.StateCopying, to: model.StateDiscovered},
+		{from: model.StateUploading, to: model.StateQueued},
+		{from: model.StateCleaning, to: model.StateVerified},
+	}
+
+	for _, recovery := range recoveries {
+		res, err := db.Exec(`
+UPDATE files
+SET state = ?, claimed_by = '', claim_until = NULL, updated_at = CURRENT_TIMESTAMP
+WHERE state = ?
+`, string(recovery.to), string(recovery.from))
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n > 0 {
+			log.Printf("[recovery] reset %d file(s) %s -> %s", n, recovery.from, recovery.to)
+		}
+	}
+
+	return nil
+}
+
 func FetchRunnable(db *sql.DB, limit int) ([]model.FileRow, error) {
-	log.Printf("[state] fetching runnable")
-	
 	rows, err := db.Query(`
 SELECT id, device_id, src_path, staged_path, size, sha256, crc32c, state, attempts, last_error
 FROM files
-WHERE (next_run_at IS NULL OR next_run_at <= CURRENT_TIMESTAMP) AND state IN ('DISCOVERED','QUEUED','VERIFIED')
+WHERE (next_run_at IS NULL OR next_run_at <= CURRENT_TIMESTAMP)
+  AND (
+    state IN ('DISCOVERED','QUEUED','VERIFIED')
+    OR (state = 'COPYING' AND (claim_until IS NULL OR claim_until < CURRENT_TIMESTAMP))
+    OR (state = 'UPLOADING' AND (claim_until IS NULL OR claim_until < CURRENT_TIMESTAMP))
+    OR (state = 'CLEANING' AND (claim_until IS NULL OR claim_until < CURRENT_TIMESTAMP))
+  )
 ORDER BY id
 LIMIT ?
 `, limit)

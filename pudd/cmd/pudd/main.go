@@ -37,6 +37,11 @@ func main() {
 	}
 	logger.Println("[main.go] sqlite database initialized")
 
+	if err := store.RecoverInterruptedWork(db); err != nil {
+		logger.Fatalf("recover interrupted work: %v", err)
+	}
+	logger.Println("[main.go] startup recovery complete")
+
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
