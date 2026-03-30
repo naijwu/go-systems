@@ -21,6 +21,9 @@ type Config struct {
 	ProbeRoot string
 	StageRoot string
 
+	// Local UI/status endpoint
+	StatusAddr string
+
 	// File management behavior
 	DeleteCameraAfterCopy   bool
 	DeleteCameraAfterVerify bool
@@ -41,6 +44,7 @@ func FromFlags() Config {
 	flag.StringVar(&cfg.MountRoot, "mount-root", "/mnt/dock", "mount root for cameras")
 	flag.StringVar(&cfg.ProbeRoot, "probe-root", "/mnt/dock/_probe", "temporary probe mounts")
 	flag.StringVar(&cfg.StageRoot, "stage-root", "/var/lib/pudd/staging", "staging root on SSD")
+	flag.StringVar(&cfg.StatusAddr, "status-addr", "127.0.0.1:8787", "local HTTP status server address")
 
 	flag.BoolVar(&cfg.DeleteCameraAfterCopy, "delete-camera-after-copy", false, "DANGEROUS: delete camera file after successful copy (requires RW remount)")
 	flag.BoolVar(&cfg.DeleteCameraAfterVerify, "delete-camera-after-verify", false, "DANGEROUS: delete camera file after upload verify and before local cleanup (requires RW remount)")

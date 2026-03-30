@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
@@ -17,6 +18,15 @@ type DiscoveredRow struct {
 	StagedPath string
 	Size       int64
 	State      model.FileState
+}
+
+type StatusSummary struct {
+	TotalFiles    int64
+	TotalBytes    int64
+	UploadedFiles int64
+	UploadedBytes int64
+	PendingErrors int64
+	LatestError   string
 }
 
 func Open(path string) (*sql.DB, error) {
@@ -104,6 +114,46 @@ LIMIT ?
 	return out, rows.Err()
 }
 
+func FetchStatusSummary(ctx context.Context, db *sql.DB) (StatusSummary, error) {
+	var summary StatusSummary
+
+	err := db.QueryRowContext(ctx, `
+SELECT
+  COUNT(*) AS total_files,
+  COALESCE(SUM(size), 0) AS total_bytes,
+  COALESCE(SUM(CASE WHEN state IN ('UPLOADED','VERIFIED','CLEANING','DONE') THEN 1 ELSE 0 END), 0) AS uploaded_files,
+  COALESCE(SUM(CASE WHEN state IN ('UPLOADED','VERIFIED','CLEANING','DONE') THEN size ELSE 0 END), 0) AS uploaded_bytes,
+  COALESCE(SUM(CASE WHEN last_error != '' AND next_run_at IS NOT NULL AND next_run_at > CURRENT_TIMESTAMP THEN 1 ELSE 0 END), 0) AS pending_errors
+FROM files
+`).Scan(
+		&summary.TotalFiles,
+		&summary.TotalBytes,
+		&summary.UploadedFiles,
+		&summary.UploadedBytes,
+		&summary.PendingErrors,
+	)
+	if err != nil {
+		return StatusSummary{}, err
+	}
+
+	var latestError sql.NullString
+	err = db.QueryRowContext(ctx, `
+SELECT last_error
+FROM files
+WHERE last_error != '' AND next_run_at IS NOT NULL AND next_run_at > CURRENT_TIMESTAMP
+ORDER BY updated_at DESC, id DESC
+LIMIT 1
+`).Scan(&latestError)
+	if err != nil && err != sql.ErrNoRows {
+		return StatusSummary{}, err
+	}
+	if latestError.Valid {
+		summary.LatestError = latestError.String
+	}
+
+	return summary, nil
+}
+
 func FetchRunnableQueued(db *sql.DB, limit int) ([]model.FileRow, error) {
 	rows, err := db.Query(`
 SELECT id, device_id, src_path, staged_path, size, sha256, crc32c, state, attempts, last_error
@@ -139,7 +189,7 @@ LIMIT ?
 func ClaimForUpload(db *sql.DB, fileID int64, claimedBy string, lease time.Duration) (bool, error) {
 	res, err := db.Exec(`
 UPDATE files
-SET state = ?, claimed_by = ?, claim_until = datetime('now', ?), updated_at = CURRENT_TIMESTAMP
+SET state = ?, claimed_by = ?, claim_until = datetime('now', ?), last_error = '', next_run_at = NULL, updated_at = CURRENT_TIMESTAMP
 WHERE id = ? AND (state = ? OR (state = ? AND (claim_until IS NULL OR claim_until < CURRENT_TIMESTAMP)))	
 `, string(model.StateUploading), claimedBy, sqliteDuration(lease), fileID, string(model.StateQueued), string(model.StateUploading),
 	)
@@ -159,6 +209,8 @@ UPDATE files
 SET state='COPYING',
     claimed_by=?,
     claim_until=datetime('now', ?),
+    last_error='',
+    next_run_at=NULL,
     updated_at=CURRENT_TIMESTAMP
 WHERE id=?
   AND (
@@ -179,7 +231,7 @@ WHERE id=?
 func ClaimQueued(db *sql.DB, fileID int64, workerID string, lease time.Duration) (bool, error) {
 	res, err := db.Exec(`
 UPDATE files
-SET state='UPLOADING', claimed_by=?, claim_until=datetime('now', ?), updated_at=CURRENT_TIMESTAMP
+SET state='UPLOADING', claimed_by=?, claim_until=datetime('now', ?), last_error='', next_run_at=NULL, updated_at=CURRENT_TIMESTAMP
 WHERE id=?
   AND (
     state='QUEUED'
@@ -199,7 +251,7 @@ WHERE id=?
 func ClaimVerified(db *sql.DB, fileID int64, workerID string, lease time.Duration) (bool, error) {
 	res, err := db.Exec(`
 UPDATE files
-SET state='CLEANING', claimed_by=?, claim_until=datetime('now', ?), updated_at=CURRENT_TIMESTAMP
+SET state='CLEANING', claimed_by=?, claim_until=datetime('now', ?), last_error='', next_run_at=NULL, updated_at=CURRENT_TIMESTAMP
 WHERE id=? AND ( state='VERIFIED' OR (state='CLEANING' AND (claim_until IS NULL OR claim_until < CURRENT_TIMESTAMP)))
 `, workerID, sqliteDuration(lease), fileID)
 	if err != nil {

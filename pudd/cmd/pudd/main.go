@@ -18,6 +18,7 @@ import (
 	"pudd/internal/progress"
 	"pudd/internal/store"
 	"pudd/internal/udev"
+	"pudd/internal/ui"
 )
 
 func main() {
@@ -46,6 +47,16 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
+	statusService := ui.NewStatusService(db)
+	statusServer := ui.NewStatusServer(cfg.StatusAddr, statusService, logger)
+	go func() {
+		if err := statusServer.Run(ctx); err != nil {
+			logger.Printf("status server error: %v", err)
+			cancel()
+		}
+	}()
+	logger.Printf("[main.go] status server listening on http://%s/status", cfg.StatusAddr)
+
 	// initialize GCS uploader
 	var uploader pipeline.Uploader
 	if cfg.Bucket != "" {
@@ -55,7 +66,17 @@ func main() {
 		}
 		defer client.Close()
 
-		uploader = gcs.NewUploader(client, cfg.Bucket, cfg.ObjectPrefix, progress.LoggerPublisher{Logger: logger})
+		uploader = gcs.NewUploader(
+			client,
+			cfg.Bucket,
+			cfg.ObjectPrefix,
+			progress.MultiPublisher{
+				Publishers: []progress.Publisher{
+					progress.LoggerPublisher{Logger: logger},
+					statusService,
+				},
+			},
+		)
 	}
 	logger.Println("[main.go] GCS uploader initialized")
 

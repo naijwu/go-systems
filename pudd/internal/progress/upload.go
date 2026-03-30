@@ -31,6 +31,19 @@ type Publisher interface {
 	PublishUpload(UploadUpdate)
 }
 
+type MultiPublisher struct {
+	Publishers []Publisher
+}
+
+func (p MultiPublisher) PublishUpload(update UploadUpdate) {
+	for _, publisher := range p.Publishers {
+		if publisher == nil {
+			continue
+		}
+		publisher.PublishUpload(update)
+	}
+}
+
 type NopPublisher struct{}
 
 func (NopPublisher) PublishUpload(UploadUpdate) {}
