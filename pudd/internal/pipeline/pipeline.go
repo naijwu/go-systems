@@ -63,7 +63,9 @@ func workerLoop(ctx context.Context, logger *log.Logger, db *sql.DB, cfg config.
 		case <-ctx.Done():
 			return
 		case f, ok := <-jobs:
-			if !ok { return }
+			if !ok {
+				return
+			}
 
 			switch f.State {
 			case model.StateDiscovered:
@@ -145,6 +147,8 @@ func handleQueued(ctx context.Context, logger *log.Logger, db *sql.DB, cfg confi
 		}
 		f.Size, f.SHA256, f.CRC32C = h.Size, h.SHA256, h.CRC32C
 	}
+
+	logger.Printf("[%s] starting upload file=%d src=%s staged=%s", workerID, f.ID, f.SrcPath, f.StagedPath)
 
 	if err := uploader.UploadAndVerify(ctx, f); err != nil {
 		store.MarkErrorWithBackoff(db, f.ID, err)
